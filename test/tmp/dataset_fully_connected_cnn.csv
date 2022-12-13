@@ -1,0 +1,4 @@
+CNN,IH,IW,IC,OC,KH,KW
+Lenet,1,1,800,120,1,1
+Lenet,1,1,120,84,1,1
+Lenet,1,1,84,10,1,1
