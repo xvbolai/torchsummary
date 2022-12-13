@@ -1,4 +1,6 @@
 import numpy as np
+import torch.nn as nn 
+import torch
 
 def activation_pre_hook(self, input):
     if hasattr(self, "activation_pre_process"):
@@ -18,9 +20,11 @@ def replace_node_module(node, modules, new_module):
     setattr(modules[parent_name], name, new_module)
     
     
-class InputShape:
+class InputShape(nn.Module):
+    
     def __init__(self):
-        self.input_shape = None
+        super(InputShape, self).__init__()
         
-    def __call__(self, x):
+    def forward(self, x):
         self.input_shape = x.shape
+        return x
