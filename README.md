@@ -17,9 +17,9 @@ import torchsummary
 import torch
 from torchsummary.summarizer import SMA
 
-from model import LeNet
+from model.Lenet import Model as Lenet
 
-model = LeNet()
+model = Lenet()
 model.eval()
 shape=(1, 3, 32, 32)
 
