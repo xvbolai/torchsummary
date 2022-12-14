@@ -50,7 +50,7 @@ class SMA:
         self.print_tabular(self.graph_module)
         
     def init(self):
-        self.save_conv(code = "CNN,IH,IW,IC,OC,KH,KW,SH,SW,PT,PH,PW,DH,DW\n")
+        self.save_conv(code = "CNN,IH,IW,IC,OC,KH,KW,SH,SW,PT,PH,PW,DH,DW,GP\n")
         self.save_pool(code = "CNN,IH,IW,IC,OC,KH,KW,SH,SW,PAT,PH,PW,DH,DW,POT\n")
         self.save_fullyconn(code = "CNN,IH,IW,IC,OC,KH,KW\n")
 
@@ -126,7 +126,9 @@ class SMA:
                         "activation_pre_process", InputShape()
                     )
                     module.register_forward_pre_hook(activation_pre_hook)
-                elif isinstance(module, (nn.MaxPool2d, nn.MaxPool1d, nn.AvgPool2d, nn.AvgPool1d)):
+                elif isinstance(module, (nn.MaxPool2d, nn.MaxPool1d, nn.AvgPool2d, 
+                                         nn.AdaptiveAvgPool2d, nn.AdaptiveMaxPool2d ,
+                                         nn.AdaptiveAvgPool1d, nn.AdaptiveMaxPool1d, nn.AvgPool1d)):
                     module.add_module(
                         "activation_pre_process", InputShape()
                     )
@@ -141,8 +143,8 @@ class SMA:
 
         self.observed_model = torch.fx.GraphModule(graph_module, graph_module.graph)
 
-    def calibrate(self, calibtraion_func):
-        calibtraion_func(self.observed_model)
+    def calibrate(self, calibtraion_func, shape):
+        calibtraion_func(self.observed_model, shape)
 
         logger.info("calibtraion finish")
         
@@ -157,35 +159,19 @@ class SMA:
     def save_fullyconn(self, code = None, filename = "./tmp/dataset_fully_connected_cnn.csv"):
         with open(filename, "a") as f:
             f.write(code)
+     
+    def get_tuple(self, param):
+        (param_x, param_y) = (param[0], param[1]) if isinstance(param, tuple) else (param, param)
+        return (param_x, param_y)
             
-    def get_param(self, module):
-        if isinstance(module.padding, tuple):
-            pad_h = module.padding[0]
-            pad_w = module.padding[1]
-        else:
-            pad_h = module.padding
-            pad_w = module.padding
-
-        if isinstance(module.stride, tuple):
-            stride_h = module.stride[0]
-            stride_w = module.stride[1]
-        else:
-            stride_h = module.stride
-            stride_w = module.stride
-
-        if isinstance(module.kernel_size, tuple):
-            kernel_h = module.kernel_size[0]
-            kernel_w = module.kernel_size[1]
-        else:
-            kernel_h = module.kernel_size
-            kernel_w = module.kernel_size
+    def get_comm_param(self, module, dialect = True):
+        
+        (pad_h, pad_w) = self.get_tuple(module.padding)
+        (stride_h, stride_w) = self.get_tuple(module.stride)
+        (kernel_h, kernel_w) = self.get_tuple(module.kernel_size)
             
-        if isinstance(module.dilation, tuple):
-            d_h = module.dilation[0]
-            d_w = module.dilation[1]
-        else:
-            d_h = module.dilation
-            d_w = module.dilation
+        (d_h, d_w) = self.get_tuple(module.dilation) if dialect else (None, None)
+        
         return (pad_h, pad_w, stride_h, stride_w, kernel_h, kernel_w, d_h, d_w)
         
     def concise(self, CNN = None):
@@ -199,22 +185,25 @@ class SMA:
                     
                     input_shape = module.activation_pre_process.input_shape
                     
-                    (pad_h, pad_w, stride_h, stride_w, kernel_h, kernel_w, d_h, d_w) = self.get_param(module=module)
+                    (pad_h, pad_w, stride_h, stride_w, kernel_h, kernel_w, d_h, d_w) = self.get_comm_param(module=module)
                         # dilation
                     # CNN,IH,IW,IC,OC,KH,KW,SH,SW,PT,PH,PW,DH,DW
-                    code = f"{CNN},{input_shape[2]},{input_shape[3]},{input_shape[1]},{module.out_channels},{kernel_h},{kernel_w},{stride_h},{stride_w},{1},{pad_h},{pad_w},{d_h},{d_w}\n"
+                    code = f"{CNN},{input_shape[2]},{input_shape[3]},{input_shape[1]},{module.out_channels},{kernel_h},{kernel_w},{stride_h},{stride_w},{1},{pad_h},{pad_w},{d_h},{d_w},{module.groups}\n"
                     self.save_conv(code = code)
                 elif isinstance(module, nn.AvgPool2d):
                     # print(module.activation_pre_process.input_shape)
                     # CNN,IH,IW,IC,OC,KH,KW,SH,SW,PAT,PH,PW,DH,DW,POT
                     input_shape = module.activation_pre_process.input_shape
-                    (pad_h, pad_w, stride_h, stride_w, kernel_h, kernel_w, d_h, d_w) = self.get_param(module=module)
-                    code = f"{CNN},{input_shape[2]},{input_shape[3]},{input_shape[1]},{input_shape[1]},{kernel_h},{kernel_w},{stride_h},{stride_w},{1},{pad_h},{pad_w},{d_h},{d_w},{1}\n"
+                    (pad_h, pad_w, stride_h, stride_w, kernel_h, kernel_w, d_h, d_w) = self.get_comm_param(module=module, dialect = False)
+                    code = f"{CNN},{input_shape[2]},{input_shape[3]},{input_shape[1]},{input_shape[1]},{kernel_h},{kernel_w},{stride_h},{stride_w},{1},{pad_h},{pad_w},{1},{1},{1}\n"
                     self.save_pool(code=code)
+                elif isinstance(module, nn.AdaptiveAvgPool2d):
+                    pass
+                
                 elif isinstance(module, nn.MaxPool2d):
                     # print(module.activation_pre_process.input_shape)
                     input_shape = module.activation_pre_process.input_shape
-                    (pad_h, pad_w, stride_h, stride_w, kernel_h, kernel_w, d_h, d_w) = self.get_param(module=module)
+                    (pad_h, pad_w, stride_h, stride_w, kernel_h, kernel_w, d_h, d_w) = self.get_comm_param(module=module)
                     code = f"{CNN},{input_shape[2]},{input_shape[3]},{input_shape[1]},{input_shape[1]},{kernel_h},{kernel_w},{stride_h},{stride_w},{1},{pad_h},{pad_w},{d_h},{d_w},{2}\n"
                     self.save_pool(code=code)
                 elif isinstance(module, nn.Linear):
